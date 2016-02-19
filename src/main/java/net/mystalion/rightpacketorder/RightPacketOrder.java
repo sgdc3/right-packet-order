@@ -6,15 +6,10 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 import java.util.Set;
 import java.util.stream.Collectors;
 
 import org.bukkit.Bukkit;
-import org.bukkit.Location;
-import org.bukkit.command.Command;
-import org.bukkit.command.CommandExecutor;
-import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
@@ -30,79 +25,106 @@ import com.comphenix.protocol.reflect.StructureModifier;
 
 public class RightPacketOrder extends JavaPlugin {
 
-	private static final Random RANDOM = new Random();
 	private final Map<Player, Set<String>> sendChunks = new HashMap<Player, Set<String>>();
 	private final Map<Player, Map<String, List<PacketContainer>>> packetQueue = new HashMap<Player, Map<String, List<PacketContainer>>>();
 
-	@Override
-	public void onEnable() {
-		Bukkit.getPluginManager().registerEvents(new Listener() {
+    @Override
+    public void onEnable() {
+        getLogger().info("[RightPacketOrder] Plugin is starting!");
+        setupEvents();
+        //setupTestCommand();
+        setupListeners();
+        getLogger().info("[RightPacketOrder] Plugin started correctly!");
+    }
 
-			@EventHandler
-			public void onPlayerDisconnect(PlayerQuitEvent event) {
-				sendChunks.remove(event.getPlayer());
-				packetQueue.remove(event.getPlayer());
-			}
-		}, this);
-		getCommand("test-right-order").setExecutor(new CommandExecutor() {
+    @Override
+    public void onDisable() {
+        getLogger().info("[RightPacketOrder] Plugin disabled!");
+    }
 
-			public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-				if (sender.hasPermission("rightpacketorder.test")) {
-					Location x = new Location(Bukkit.getWorlds().get(0), RANDOM.nextInt(10000) - 5000, 70, RANDOM.nextInt(10000) - 5000);
-					for (Player player : Bukkit.getOnlinePlayers()) {
-						player.teleport(x);
-					}
-				} else {
-					sender.sendMessage("Sorry, but you dont have permissions for this command.");
-				}
-				return true;
-			}
-		});
-		ProtocolLibrary.getProtocolManager().addPacketListener(new PacketAdapter(this, 
-//@formatter:off
-				// World
-				PacketType.Play.Server.MAP_CHUNK,
-				PacketType.Play.Server.MAP_CHUNK_BULK,
-				PacketType.Play.Server.RESPAWN,
+	private void setupEvents() {
+        Bukkit.getPluginManager().registerEvents(new Listener() {
 
-				// Entities
-		//		PacketType.Play.Server.SPAWN_ENTITY,
-		//		PacketType.Play.Server.SPAWN_ENTITY_LIVING,
-		//		PacketType.Play.Server.SPAWN_ENTITY_PAINTING,
-				PacketType.Play.Server.NAMED_ENTITY_SPAWN
-//@formatter:on
-		) {
-
-			@Override
-			public void onPacketSending(PacketEvent event) {
-				Player player = event.getPlayer();
-				PacketContainer packet = event.getPacket();
-				if (event.getPacketType() == PacketType.Play.Server.RESPAWN) {
-					sendChunks.remove(player);
-				} else if (event.getPacketType() == PacketType.Play.Server.MAP_CHUNK) {
-					handleChunkSending(player, packet.getIntegers().read(0), packet.getIntegers().read(1));
-				} else if (event.getPacketType() == PacketType.Play.Server.MAP_CHUNK_BULK) {
-					processChunkBulk(event, packet);
-				} else {
-					StructureModifier<Integer> ints = event.getPacket().getIntegers();
-					int x = ints.read(1);
-					//	int y = ints.read(2);
-					int z = ints.read(3);
-					int cx = x / 32 >> 4;
-					int cz = z / 32 >> 4;
-					if (sendChunks.containsKey(player)) {
-						if (!sendChunks.get(player).contains(toKey(cx, cz))) {
-							player.sendMessage("Delaying packet: " + packet);
-							player.sendMessage(sendChunks.get(player).stream().collect(Collectors.joining("\n")));
-							player.sendMessage("real:" + toKey(cx, cz));
-							getPacketQueue(player, cx, cz).add(packet);
-							event.setCancelled(true);
-						}
-					}
-				}
-			}
-		});
+            @EventHandler
+            public void onPlayerDisconnect(PlayerQuitEvent event) {
+                sendChunks.remove(event.getPlayer());
+                packetQueue.remove(event.getPlayer());
+            }
+        }, this);
 	}
+
+    /* TEST ONLY
+    private static final Random RANDOM = new Random();
+    public void setupTestCommand() {
+        getCommand("test-right-order").setExecutor(new CommandExecutor() {
+
+            public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+                if (sender.hasPermission("rightpacketorder.test")) {
+                    Location x = new Location(Bukkit.getWorlds().get(0), RANDOM.nextInt(10000) - 5000, 70, RANDOM.nextInt(10000) - 5000);
+                    for (Player player : Bukkit.getOnlinePlayers()) {
+                        player.teleport(x);
+                    }
+                } else {
+                    sender.sendMessage("Sorry, but you dont have permissions for this command.");
+                }
+                return true;
+            }
+        });
+    }
+    */
+
+	private void setupListeners() {
+        ProtocolLibrary.getProtocolManager().addPacketListener(new PacketAdapter(this, 
+                /*
+                 * World
+                 */
+                PacketType.Play.Server.MAP_CHUNK,
+                PacketType.Play.Server.MAP_CHUNK_BULK,
+                PacketType.Play.Server.RESPAWN,
+ 
+                /*
+                 * Entities (Not players)
+                 * 
+                 * TODO: check this!
+                 * PacketType.Play.Server.SPAWN_ENTITY,
+                 * PacketType.Play.Server.SPAWN_ENTITY_LIVING,
+                 * PacketType.Play.Server.SPAWN_ENTITY_PAINTING,
+                 */
+                PacketType.Play.Server.NAMED_ENTITY_SPAWN
+            ) {
+
+                @Override
+                public void onPacketSending(PacketEvent event) {
+                    Player player = event.getPlayer();
+                    PacketContainer packet = event.getPacket();
+                    PacketType type = event.getPacketType();
+
+                    if (type == PacketType.Play.Server.RESPAWN) {
+                        sendChunks.remove(player);
+                    } else if (type == PacketType.Play.Server.MAP_CHUNK) {
+                        handleChunkSending(player, packet.getIntegers().read(0), packet.getIntegers().read(1));
+                    } else if (type == PacketType.Play.Server.MAP_CHUNK_BULK) {
+                        processChunkBulk(event, packet);
+                    } else {
+                        StructureModifier<Integer> ints = event.getPacket().getIntegers();
+                        int x = ints.read(1);
+                        //  int y = ints.read(2);
+                        int z = ints.read(3);
+                        int cx = x / 32 >> 4;
+                        int cz = z / 32 >> 4;
+                        if (sendChunks.containsKey(player)) {
+                            if (!sendChunks.get(player).contains(toKey(cx, cz))) {
+                                player.sendMessage("Delaying packet: " + packet);
+                                player.sendMessage(sendChunks.get(player).stream().collect(Collectors.joining("\n")));
+                                player.sendMessage("real:" + toKey(cx, cz));
+                                getPacketQueue(player, cx, cz).add(packet);
+                                event.setCancelled(true);
+                            }
+                        }
+                    }
+                }
+            });    
+    }
 
 	private List<PacketContainer> getPacketQueue(Player player, int x, int z) {
 		if (!packetQueue.containsKey(player)) {
